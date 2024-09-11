@@ -33,7 +33,7 @@ Bun.serve({
 });
 
 async function resize(url) {
-    const preset = "pr:sharp/t:webp"
+    const preset = "pr:sharp/f:webp"
     const src = url.pathname.split("/").slice(2).join("/");
     const origin = new URL(src).hostname;
     const allowed = allowedDomains.filter(domain => {
