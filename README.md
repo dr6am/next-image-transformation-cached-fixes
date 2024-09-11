@@ -1,3 +1,10 @@
+# Next.js Image Transformation Cached
+
+Fork of https://github.com/coollabsio/next-image-transformation.<br /><br />
+Adds a simple cache to the service that saves resized images on disk.<br /><br />
+Set the `CACHE_INVALIDATION_TIME` environment variable to define after how many seconds a cached image should be reloaded and resized from the original source. Default is 24 hours.<br /><br />
+Additionally formats images to webp format.
+
 # Next.js Image Transformation
 
 An open-source & self-hostable image optimization service, a drop-in replacement for Vercel's Image Optimization.
@@ -58,9 +65,9 @@ export default function myImageLoader({ src, width, quality }) {
         return src;
     }
     if (isLocal) {
-        return `${imageOptimizationApi}/${fullSrc}?${query.toString()}`;
+        return `${imageOptimizationApi}/image/${fullSrc}?${query.toString()}`;
     }
-    return `${imageOptimizationApi}/${src}?${query.toString()}`;
+    return `${imageOptimizationApi}/image/${src}?${query.toString()}`;
 }
 ```
 
