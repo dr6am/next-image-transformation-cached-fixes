@@ -39,8 +39,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
   aarch64:
-    runs-on: 
-      group: aarch-runners
+    runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
