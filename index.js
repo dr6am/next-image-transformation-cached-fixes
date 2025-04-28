@@ -40,41 +40,48 @@ const HEADER_WHITELIST = [
 
 // Add CORS headers to allow all origins
 function addCorsHeaders(headers) {
+    // Set standard CORS headers
     headers.set("Access-Control-Allow-Origin", "*");
     headers.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
     headers.set("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Range");
     headers.set("Access-Control-Expose-Headers", "Content-Length, Content-Type, Accept-Ranges, Content-Range");
+    headers.set("Access-Control-Max-Age", "86400"); // 24 hours
+
+    // Additional headers to fix Chrome ERR_FAILED issues
     headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+    headers.set("Cross-Origin-Embedder-Policy", "credentialless");
     headers.set("Timing-Allow-Origin", "*");
+    headers.set("Vary", "Origin");
+
     return headers;
 }
 
 Bun.serve({
     port: 3000,
     async fetch(req) {
+        // Add CORS headers to all responses
+        const responseHeaders = new Headers();
+        addCorsHeaders(responseHeaders);
+
         const url = new URL(req.url);
 
         // Handle preflight requests
         if (req.method === "OPTIONS") {
-            const corsHeaders = addCorsHeaders(new Headers());
-            corsHeaders.set("Access-Control-Max-Age", "86400"); // 24 hours
             return new Response(null, {
                 status: 204,
-                headers: corsHeaders
+                headers: responseHeaders
             });
         }
 
         if (url.pathname === "/") {
-            const headers = addCorsHeaders(new Headers({ "Content-Type": "text/html" }));
+            responseHeaders.set("Content-Type", "text/html");
             return new Response(
                 `<h3>Next Image Transformation v${version}</h3>More info <a href="https://github.com/coollabsio/next-image-transformation">GitHub</a>.`,
-                { headers }
+                { headers: responseHeaders }
             );
         }
         if (url.pathname === "/health") {
-            return new Response("OK", {
-                headers: addCorsHeaders(new Headers())
-            });
+            return new Response("OK", { headers: responseHeaders });
         }
 
         if (url.pathname.startsWith("/image/")) {
@@ -86,14 +93,18 @@ Bun.serve({
                 console.error(e);
                 return new Response("Bad request", {
                     status: 400,
-                    headers: addCorsHeaders(new Headers())
+                    headers: responseHeaders
                 });
             }
         }
-        return Response.redirect(
-            "https://github.com/coollabsio/next-image-transformation",
-            302,
-        );
+
+        // Use CORS headers even for redirects
+        return new Response(null, {
+            status: 302,
+            headers: Object.assign(responseHeaders, {
+                Location: "https://github.com/coollabsio/next-image-transformation"
+            })
+        });
     },
 });
 
@@ -103,72 +114,104 @@ async function resize(url) {
     try {
         srcUrl = new URL(src);
     } catch {
+        const headers = new Headers();
+        addCorsHeaders(headers);
         return new Response("Invalid src URL", {
             status: 400,
-            headers: addCorsHeaders(new Headers())
+            headers
         });
     }
 
-    if (!["http:", "https:"].includes(srcUrl.protocol))
+    if (!["http:", "https:"].includes(srcUrl.protocol)) {
+        const headers = new Headers();
+        addCorsHeaders(headers);
         return new Response("Unsupported protocol", {
             status: 400,
-            headers: addCorsHeaders(new Headers())
+            headers
         });
-    if (srcUrl.port && !["", "80", "443"].includes(srcUrl.port))
+    }
+
+    if (srcUrl.port && !["", "80", "443"].includes(srcUrl.port)) {
+        const headers = new Headers();
+        addCorsHeaders(headers);
         return new Response("Unsupported port", {
             status: 400,
-            headers: addCorsHeaders(new Headers())
+            headers
         });
+    }
 
     const origin = srcUrl.hostname.toLowerCase();
-    if (!domainAllowed(origin))
+    if (!domainAllowed(origin)) {
+        const headers = new Headers();
+        addCorsHeaders(headers);
         return new Response(
             `Domain (${origin}) not allowed. See docs for configuration.`,
             {
                 status: 403,
-                headers: addCorsHeaders(new Headers())
+                headers
             }
         );
+    }
 
     const width = validDimension(url.searchParams.get("width"));
     const height = validDimension(url.searchParams.get("height"));
     const quality = validQuality(url.searchParams.get("quality"));
-    if (width === null || height === null || quality === null)
+    if (width === null || height === null || quality === null) {
+        const headers = new Headers();
+        addCorsHeaders(headers);
         return new Response("Invalid parameters", {
             status: 400,
-            headers: addCorsHeaders(new Headers())
+            headers
         });
+    }
 
     const preset = "pr:sharp/f:webp";
     const urlString = `${imgproxyUrl}/${preset}/resize:fill:${width}:${height}/q:${quality}/plain/${src}`;
 
-    const image = await fetch(urlString, {
-        headers: { Accept: "image/avif,image/webp,image/apng,*/*" },
-    });
-    if (!image.ok) return new Response("Error fetching image", {
-        status: 502,
-        headers: addCorsHeaders(new Headers())
-    });
-
-    const contentType = image.headers.get("Content-Type") ?? "";
-    if (!contentType.startsWith("image/"))
-        return new Response("Unsupported media type", {
-            status: 415,
-            headers: addCorsHeaders(new Headers())
+    try {
+        const image = await fetch(urlString, {
+            headers: { Accept: "image/avif,image/webp,image/apng,*/*" },
         });
 
-    const headers = new Headers();
-    HEADER_WHITELIST.forEach((h) => {
-        const v = image.headers.get(h);
-        if (v) headers.set(h, v);
-    });
-    headers.set("Server", "NextImageTransformation");
-    headers.set("Vary", "Origin");
-    addCorsHeaders(headers);
+        if (!image.ok) {
+            const headers = new Headers();
+            addCorsHeaders(headers);
+            return new Response("Error fetching image", {
+                status: 502,
+                headers
+            });
+        }
 
-    const imageArrayBuffer = await image.arrayBuffer();
-    await writeImageToCache(url, imageArrayBuffer, headers);
-    return getCached(url); // вернём из кеша, чтобы не дублировать код
+        const contentType = image.headers.get("Content-Type") ?? "";
+        if (!contentType.startsWith("image/")) {
+            const headers = new Headers();
+            addCorsHeaders(headers);
+            return new Response("Unsupported media type", {
+                status: 415,
+                headers
+            });
+        }
+
+        const headers = new Headers();
+        HEADER_WHITELIST.forEach((h) => {
+            const v = image.headers.get(h);
+            if (v) headers.set(h, v);
+        });
+        headers.set("Server", "NextImageTransformation");
+        addCorsHeaders(headers);
+
+        const imageArrayBuffer = await image.arrayBuffer();
+        await writeImageToCache(url, imageArrayBuffer, headers);
+        return getCached(url); // вернём из кеша, чтобы не дублировать код
+    } catch (error) {
+        console.error("Image fetch error:", error);
+        const headers = new Headers();
+        addCorsHeaders(headers);
+        return new Response("Error processing image request", {
+            status: 500,
+            headers
+        });
+    }
 }
 
 async function writeImageToCache(
@@ -196,7 +239,6 @@ async function getCached(url) {
     if (Date.now() - metaData.cachedAt > cacheInvalidationTime * 1000) return null;
 
     const headers = new Headers(metaData.headers);
-    headers.set("Vary", "Origin");
     addCorsHeaders(headers);
     return new Response(file, { headers });
 }
