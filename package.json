@@ -3,10 +3,10 @@
   "module": "index.js",
   "type": "module",
   "scripts": {
-    "dev": "bun run --watch ./index.js",
+    "dev": "npx bun run --watch ./index.js",
     "start": "bun run ./index.js"
   },
-  "devDependencies": {},
-  "peerDependencies": {},
-  "dependencies": {}
+  "devDependencies": {
+    "@types/bun": "^1.2.10"
+  }
 }
