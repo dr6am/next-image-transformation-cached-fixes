@@ -6,7 +6,7 @@ on:
   
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: "ferdimarti/next-image-transformation-cached"
+  IMAGE_NAME: "dr6am/next-image-transformation-cached-fixes"
 
 jobs:
   amd64:

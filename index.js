@@ -4,8 +4,13 @@ let allowedDomains = (process?.env?.ALLOWED_REMOTE_DOMAINS ?? "*")
     .split(",")
     .map((d) => d.trim().toLowerCase());
 
+// Improve Docker networking support
 let imgproxyUrl = process?.env?.IMGPROXY_URL || "http://imgproxy:8080";
-if (process.env.NODE_ENV === "development") imgproxyUrl = "http://localhost:8888";
+// In development, we might be running outside Docker
+if (process.env.NODE_ENV === "development") {
+    imgproxyUrl = process?.env?.IMGPROXY_DEV_URL || "http://localhost:8888";
+}
+console.log(`Using imgproxy URL: ${imgproxyUrl}`);
 
 const cacheInvalidationTime =
     Number(process?.env?.CACHE_INVALIDATION_TIME) || 24 * 60 * 60; // сек.
@@ -56,9 +61,20 @@ function addCorsHeaders(headers) {
     return headers;
 }
 
+// Make sure the cache directory exists
+try {
+    Bun.mkdir("./cache", { recursive: true });
+    console.log("Cache directory ready");
+} catch (error) {
+    console.error("Error creating cache directory:", error);
+}
+
 Bun.serve({
-    port: 3000,
+    port: process.env.PORT || 3000,
     async fetch(req) {
+        // Log the incoming request (helpful for debugging)
+        console.log(`${req.method} ${new URL(req.url).pathname}`);
+
         // Add CORS headers to all responses
         const responseHeaders = new Headers();
         addCorsHeaders(responseHeaders);
@@ -67,6 +83,7 @@ Bun.serve({
 
         // Handle preflight requests
         if (req.method === "OPTIONS") {
+            console.log(`Responding to preflight request from origin: ${req.headers.get("Origin")}`);
             return new Response(null, {
                 status: 204,
                 headers: responseHeaders
@@ -87,10 +104,14 @@ Bun.serve({
         if (url.pathname.startsWith("/image/")) {
             try {
                 const cached = await getCached(url);
-                if (cached) return cached;
+                if (cached) {
+                    console.log("Serving from cache:", url.pathname);
+                    return cached;
+                }
+                console.log("Processing new image:", url.pathname);
                 return await resize(url);
             } catch (e) {
-                console.error(e);
+                console.error("Error processing image request:", e);
                 return new Response("Bad request", {
                     status: 400,
                     headers: responseHeaders
@@ -167,16 +188,21 @@ async function resize(url) {
 
     const preset = "pr:sharp/f:webp";
     const urlString = `${imgproxyUrl}/${preset}/resize:fill:${width}:${height}/q:${quality}/plain/${src}`;
+    console.log(`Fetching from imgproxy: ${urlString}`);
 
     try {
         const image = await fetch(urlString, {
             headers: { Accept: "image/avif,image/webp,image/apng,*/*" },
+        }).catch(err => {
+            console.error("Fetch to imgproxy failed:", err.message);
+            throw err;
         });
 
         if (!image.ok) {
+            console.error(`Imgproxy returned status: ${image.status}`);
             const headers = new Headers();
             addCorsHeaders(headers);
-            return new Response("Error fetching image", {
+            return new Response(`Error fetching image: ${image.status} ${image.statusText}`, {
                 status: 502,
                 headers
             });
@@ -186,7 +212,7 @@ async function resize(url) {
         if (!contentType.startsWith("image/")) {
             const headers = new Headers();
             addCorsHeaders(headers);
-            return new Response("Unsupported media type", {
+            return new Response(`Unsupported media type: ${contentType}`, {
                 status: 415,
                 headers
             });
@@ -207,7 +233,7 @@ async function resize(url) {
         console.error("Image fetch error:", error);
         const headers = new Headers();
         addCorsHeaders(headers);
-        return new Response("Error processing image request", {
+        return new Response(`Error processing image request: ${error.message}`, {
             status: 500,
             headers
         });
@@ -219,26 +245,37 @@ async function writeImageToCache(
     image,
     headers
 ) {
-    const cacheKey = encodeURIComponent(url.pathname + url.search + version);
-    const path = "./cache/" + cacheKey;
-    const metaPath = path + ".meta";
-    await Bun.write(path, image);
-    await Bun.write(
-        metaPath,
-        JSON.stringify({ headers: Object.fromEntries(headers), cachedAt: Date.now() }),
-    );
+    try {
+        const cacheKey = encodeURIComponent(url.pathname + url.search + version);
+        const path = "./cache/" + cacheKey;
+        const metaPath = path + ".meta";
+        await Bun.write(path, image);
+        await Bun.write(
+            metaPath,
+            JSON.stringify({ headers: Object.fromEntries(headers), cachedAt: Date.now() }),
+        );
+        console.log(`Cached image: ${path}`);
+    } catch (error) {
+        console.error("Error writing to cache:", error);
+        // Continue execution even if caching fails
+    }
 }
 
 async function getCached(url) {
-    const cacheKey = encodeURIComponent(url.pathname + url.search + version);
-    const file = Bun.file("./cache/" + cacheKey);
-    const metaFile = Bun.file("./cache/" + cacheKey + ".meta");
-    if (!(await file.exists()) || !(await metaFile.exists())) return null;
+    try {
+        const cacheKey = encodeURIComponent(url.pathname + url.search + version);
+        const file = Bun.file("./cache/" + cacheKey);
+        const metaFile = Bun.file("./cache/" + cacheKey + ".meta");
+        if (!(await file.exists()) || !(await metaFile.exists())) return null;
 
-    const metaData = JSON.parse(await metaFile.text());
-    if (Date.now() - metaData.cachedAt > cacheInvalidationTime * 1000) return null;
+        const metaData = JSON.parse(await metaFile.text());
+        if (Date.now() - metaData.cachedAt > cacheInvalidationTime * 1000) return null;
 
-    const headers = new Headers(metaData.headers);
-    addCorsHeaders(headers);
-    return new Response(file, { headers });
+        const headers = new Headers(metaData.headers);
+        addCorsHeaders(headers);
+        return new Response(file, { headers });
+    } catch (error) {
+        console.error("Error reading from cache:", error);
+        return null;
+    }
 }
