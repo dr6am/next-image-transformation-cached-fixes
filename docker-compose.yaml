@@ -1,6 +1,6 @@
 services:
   api:
-    image: ghcr.io/coollabsio/next-image-transformation
+    image: ghcr.io/dr6am/next-image-transformation-cached-fixes
     ports:
       - "3000"
     environment:
