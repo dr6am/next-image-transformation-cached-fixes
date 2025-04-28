@@ -1,3 +1,8 @@
+# Updated 
+
+
+
+
 # Next.js Image Transformation Cached
 
 Fork of https://github.com/coollabsio/next-image-transformation.<br /><br />

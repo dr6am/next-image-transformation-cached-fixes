@@ -41,8 +41,11 @@ const HEADER_WHITELIST = [
 // Add CORS headers to allow all origins
 function addCorsHeaders(headers) {
     headers.set("Access-Control-Allow-Origin", "*");
-    headers.set("Access-Control-Allow-Methods", "GET, OPTIONS");
-    headers.set("Access-Control-Allow-Headers", "Content-Type");
+    headers.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    headers.set("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Range");
+    headers.set("Access-Control-Expose-Headers", "Content-Length, Content-Type, Accept-Ranges, Content-Range");
+    headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+    headers.set("Timing-Allow-Origin", "*");
     return headers;
 }
 
@@ -53,9 +56,11 @@ Bun.serve({
 
         // Handle preflight requests
         if (req.method === "OPTIONS") {
+            const corsHeaders = addCorsHeaders(new Headers());
+            corsHeaders.set("Access-Control-Max-Age", "86400"); // 24 hours
             return new Response(null, {
                 status: 204,
-                headers: addCorsHeaders(new Headers())
+                headers: corsHeaders
             });
         }
 
@@ -158,6 +163,7 @@ async function resize(url) {
         if (v) headers.set(h, v);
     });
     headers.set("Server", "NextImageTransformation");
+    headers.set("Vary", "Origin");
     addCorsHeaders(headers);
 
     const imageArrayBuffer = await image.arrayBuffer();
@@ -190,6 +196,7 @@ async function getCached(url) {
     if (Date.now() - metaData.cachedAt > cacheInvalidationTime * 1000) return null;
 
     const headers = new Headers(metaData.headers);
+    headers.set("Vary", "Origin");
     addCorsHeaders(headers);
     return new Response(file, { headers });
 }
